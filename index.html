@@ -33,6 +33,9 @@
             </div>
         </header>
 
+        <!-- 状态提示 -->
+        <div id="status-banner" class="mb-4 hidden p-3 rounded-lg text-sm text-center"></div>
+
         <!-- 表单部分 -->
         <div id="auth-section" class="mb-6 bg-blue-50 p-6 rounded-xl border border-blue-100 space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -100,31 +103,31 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // ==========================================
-        // 重要：请从 Firebase 控制台复制您的 Web 应用配置填入下方
-        // Firebase Console -> 项目设置 -> 常规 -> 您的应用
-        // ==========================================
-        const firebaseConfig = typeof __firebase_config !== 'undefined' 
-            ? JSON.parse(__firebase_config) 
-            : {
-                apiKey: "AIzaSyDcKxpw16p5tg3p04a2Wr-WQWSJt-WxlJA",
-                authDomain: "kitch-618c0.firebaseapp.com",
-                projectId: "kitch-618c0",
-                storageBucket: "kitch-618c0.firebasestorage.app",
-                messagingSenderId: "977076208599",
-                appId: "1:977076208599:web:4d432fd785e7fffb3a4192"
-            };
+        const firebaseConfig = {
+            apiKey: "AIzaSyDcKxpw16p5tg3p04a2Wr-WQWSJt-WxlJA",
+            authDomain: "kitch-618c0.firebaseapp.com",
+            projectId: "kitch-618c0",
+            storageBucket: "kitch-618c0.firebasestorage.app",
+            messagingSenderId: "977076208599",
+            appId: "1:977076208599:web:4d432fd785e7fffb3a4192"
+        };
 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'canteen-v1';
+        const appId = 'canteen-v1';
         
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        let currentUser = null;
         let allOrders = [];
         const daysOfWeek = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
         let nextWeekDates = [];
+
+        function setStatus(msg, type = 'info') {
+            const banner = document.getElementById('status-banner');
+            banner.innerText = msg;
+            banner.className = `mb-4 p-3 rounded-lg text-sm text-center ${type === 'error' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`;
+            banner.classList.remove('hidden');
+        }
 
         function calculateNextWeekDates() {
             const now = new Date();
@@ -193,7 +196,7 @@
 
         document.getElementById('submit-order').onclick = async () => {
             if (!auth.currentUser) {
-                showToast("未连接到服务器，请尝试刷新页面");
+                showToast("未登录，请刷新页面重试");
                 return;
             }
             const name = document.getElementById('username').value.trim();
@@ -217,19 +220,26 @@
                 });
                 showToast("提交成功！");
             } catch (e) {
-                console.error("提交失败:", e);
-                showToast("提交失败: " + e.message);
+                console.error("提交异常:", e);
+                if (e.code === 'permission-denied') {
+                    setStatus("提交失败：Firebase 安全规则拒绝访问。请检查控制台规则设置。", "error");
+                } else {
+                    showToast("提交失败: " + e.message);
+                }
             }
         };
 
         function loadData() {
-            if (!auth.currentUser) return;
             const ordersCol = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
             onSnapshot(ordersCol, (snap) => {
                 allOrders = snap.docs.map(d => d.data());
                 renderStats();
+                document.getElementById('status-banner').classList.add('hidden');
             }, (error) => {
-                console.error("监听数据失败:", error);
+                console.error("数据加载失败:", error);
+                if (error.code === 'permission-denied') {
+                    setStatus("加载失败：权限不足。请在 Firebase 控制台设置 Rules。", "error");
+                }
             });
         }
 
@@ -272,18 +282,15 @@
             initUI();
             try {
                 await signInAnonymously(auth);
-                console.log("匿名登录成功");
+                console.log("已匿名登录");
             } catch (e) {
-                console.error("登录失败:", e);
-                showToast("连接服务器失败，请检查配置");
+                console.error("登录异常:", e);
+                setStatus("无法连接到 Firebase Auth，请检查 API Key 和配置。", "error");
             }
         };
 
         onAuthStateChanged(auth, u => {
-            if(u) {
-                currentUser = u;
-                loadData();
-            }
+            if(u) loadData();
         });
     </script>
 </body>
