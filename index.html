@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>食堂下周订餐统计</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .meal-checkbox:checked + label {
+            background-color: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
+        /* 禁用状态样式 */
+        .meal-checkbox:disabled + label {
+            background-color: #f3f4f6;
+            color: #9ca3af;
+            border-color: #e5e7eb;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+    <div id="app" class="max-w-4xl mx-auto p-4 md:p-8">
+        <!-- 头部 -->
+        <header class="flex justify-between items-center mb-8 bg-white p-6 rounded-2xl shadow-sm">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-800">食堂订餐系统</h1>
+                <p class="text-sm text-gray-500" id="week-range">正在获取日期...</p>
+            </div>
+            <div class="flex space-x-2">
+                <button id="view-user" class="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium">我要订餐</button>
+                <button id="view-admin" class="px-4 py-2 rounded-lg bg-gray-200 text-gray-700 font-medium">大厨统计</button>
+            </div>
+        </header>
+
+        <!-- 身份识别与地址选择 -->
+        <div id="auth-section" class="mb-6 bg-blue-50 p-6 rounded-xl border border-blue-100 space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="flex items-center space-x-4">
+                    <label class="text-blue-800 font-medium whitespace-nowrap">姓名/工号:</label>
+                    <input type="text" id="username" placeholder="请输入姓名" class="w-full border border-blue-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm">
+                </div>
+                <!-- 中餐地址 -->
+                <div class="flex items-center space-x-4">
+                    <label class="text-blue-800 font-medium whitespace-nowrap">中餐地址:</label>
+                    <select id="lunch-location" class="w-full border border-blue-200 rounded-lg p-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm">
+                        <option value="工厂">工厂</option>
+                        <option value="办公室">办公室</option>
+                    </select>
+                </div>
+                <!-- 晚餐地址 -->
+                <div class="flex items-center space-x-4 md:col-start-2">
+                    <label class="text-blue-800 font-medium whitespace-nowrap">晚餐地址:</label>
+                    <select id="dinner-location" class="w-full border border-blue-200 rounded-lg p-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm">
+                        <option value="301">301</option>
+                        <option value="407">407</option>
+                        <option value="E406">E406</option>
+                        <option value="506">506</option>
+                        <option value="703">703</option>
+                        <option value="1103">1103</option>
+                        <option value="901">901</option>
+                        <option value="527">527</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- 用户订餐视图 -->
+        <div id="user-view" class="space-y-6">
+            <div class="bg-white rounded-2xl shadow-md overflow-x-auto">
+                <table class="w-full text-left border-collapse min-w-[500px]">
+                    <thead class="bg-gray-100 text-gray-600">
+                        <tr>
+                            <th class="p-4">日期</th>
+                            <th class="p-4 text-center">早餐</th>
+                            <th class="p-4 text-center">午餐</th>
+                            <th class="p-4 text-center">晚餐</th>
+                        </tr>
+                    </thead>
+                    <tbody id="order-table-body">
+                        <!-- 动态生成行 -->
+                    </tbody>
+                </table>
+            </div>
+            <button id="submit-order" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg transition duration-200">
+                提交下周订餐需求
+            </button>
+        </div>
+
+        <!-- 管理员统计视图 -->
+        <div id="admin-view" class="hidden space-y-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="stats-summary">
+                <!-- 统计卡片 -->
+            </div>
+            <div class="bg-white rounded-2xl shadow-md p-6">
+                <h3 class="text-lg font-bold mb-4">每日明细表 (分餐次送餐地址)</h3>
+                <div id="admin-details" class="space-y-4">
+                    <!-- 详细列表 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 消息提示 -->
+        <div id="toast" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-2xl hidden z-50">
+            操作成功
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'canteen-demo';
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        let user = null;
+        let allOrders = [];
+        const daysOfWeek = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+        const mealTypes = ['breakfast', 'lunch', 'dinner'];
+        let nextWeekDates = [];
+
+        function calculateNextWeekDates() {
+            const now = new Date();
+            const monday = new Date(now);
+            const daysToMonday = (1 + 7 - now.getDay()) % 7 || 7; 
+            monday.setDate(now.getDate() + daysToMonday);
+            
+            const dates = [];
+            for (let i = 0; i < 7; i++) {
+                const date = new Date(monday);
+                date.setDate(monday.getDate() + i);
+                dates.push({
+                    formatted: `${date.getMonth() + 1}/${date.getDate()}`,
+                    full: date.toLocaleDateString(),
+                    dayName: daysOfWeek[i]
+                });
+            }
+            return dates;
+        }
+
+        function initUI() {
+            nextWeekDates = calculateNextWeekDates();
+            const tableBody = document.getElementById('order-table-body');
+            tableBody.innerHTML = '';
+            
+            nextWeekDates.forEach((dateInfo, index) => {
+                const isSunday = (index === 6); // 周日
+                const row = document.createElement('tr');
+                row.className = "border-t border-gray-100 hover:bg-gray-50 transition-colors";
+                
+                let mealCells = mealTypes.map(meal => {
+                    // 判断周日中晚餐不开放
+                    const isRestricted = isSunday && (meal === 'lunch' || meal === 'dinner');
+                    const disabledAttr = isRestricted ? 'disabled' : '';
+                    const labelText = isRestricted ? '不开放' : '需要';
+                    
+                    return `
+                        <td class="p-4 text-center">
+                            <input type="checkbox" id="check-${index}-${meal}" 
+                                class="hidden meal-checkbox" 
+                                data-day="${index}" 
+                                data-meal="${meal}" 
+                                ${disabledAttr}>
+                            <label for="check-${index}-${meal}" 
+                                class="inline-block px-4 py-1 border border-gray-200 rounded-full cursor-pointer hover:border-blue-400 transition-colors">
+                                ${labelText}
+                            </label>
+                        </td>
+                    `;
+                }).join('');
+
+                row.innerHTML = `
+                    <td class="p-4">
+                        <div class="text-sm text-gray-400 font-medium">${dateInfo.formatted}</div>
+                        <div class="font-bold text-gray-700">${dateInfo.dayName}</div>
+                    </td>
+                    ${mealCells}
+                `;
+                tableBody.appendChild(row);
+            });
+            document.getElementById('week-range').innerText = `下周周期: ${nextWeekDates[0].full} 至 ${nextWeekDates[6].full}`;
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 3000);
+        }
+
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("认证失败:", error);
+            }
+        };
+
+        onAuthStateChanged(auth, (u) => {
+            user = u;
+            if (user) {
+                loadOrders();
+            }
+        });
+
+        document.getElementById('submit-order').onclick = async () => {
+            const username = document.getElementById('username').value.trim();
+            const lunchLocation = document.getElementById('lunch-location').value;
+            const dinnerLocation = document.getElementById('dinner-location').value;
+            
+            if (!username) {
+                showToast("请输入您的姓名或工号");
+                document.getElementById('username').focus();
+                return;
+            }
+
+            if (!user) return;
+
+            const selections = [];
+            // 选中的且未被禁用的（确保逻辑一致性）
+            document.querySelectorAll('.meal-checkbox:checked:not(:disabled)').forEach(cb => {
+                selections.push({
+                    day: parseInt(cb.dataset.day),
+                    meal: cb.dataset.meal
+                });
+            });
+
+            if (selections.length === 0) {
+                showToast("请至少选择一个用餐时段");
+                return;
+            }
+
+            try {
+                const orderDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', user.uid);
+                await setDoc(orderDocRef, {
+                    username: username,
+                    lunchLocation: lunchLocation,
+                    dinnerLocation: dinnerLocation,
+                    uid: user.uid,
+                    selections: selections,
+                    updatedAt: new Date().toISOString()
+                });
+                showToast("提交成功！");
+            } catch (err) {
+                showToast("提交出错，请稍后重试");
+            }
+        };
+
+        function loadOrders() {
+            if (!user) return;
+            const ordersCol = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
+            onSnapshot(ordersCol, (snapshot) => {
+                allOrders = [];
+                snapshot.forEach(doc => allOrders.push(doc.data()));
+                renderStats();
+            }, (error) => console.error(error));
+        }
+
+        function renderStats() {
+            const stats = Array(7).fill(0).map(() => ({ 
+                breakfast: 0, lunch: 0, dinner: 0, 
+                details: { breakfast: [], lunch: [], dinner: [] } 
+            }));
+            
+            allOrders.forEach(order => {
+                if (order.selections) {
+                    order.selections.forEach(sel => {
+                        if (stats[sel.day]) {
+                            stats[sel.day][sel.meal]++;
+                            
+                            let locInfo = '';
+                            if (sel.meal === 'lunch') locInfo = `(${order.lunchLocation || '工厂'})`;
+                            if (sel.meal === 'dinner') locInfo = `(${order.dinnerLocation || '301'})`;
+                            
+                            stats[sel.day].details[sel.meal].push(`${order.username}${locInfo}`);
+                        }
+                    });
+                }
+            });
+
+            const summaryEl = document.getElementById('stats-summary');
+            summaryEl.innerHTML = nextWeekDates.map((date, i) => `
+                <div class="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                    <div class="flex justify-between items-start mb-1">
+                        <h4 class="font-bold text-blue-600 text-sm">${date.dayName}</h4>
+                        <span class="text-[10px] text-gray-300 font-mono">${date.formatted}</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-1 text-center border-t pt-1">
+                        <div><div class="text-[10px] text-gray-400">早</div><div class="text-sm font-bold">${stats[i].breakfast}</div></div>
+                        <div><div class="text-[10px] text-gray-400">中</div><div class="text-sm font-bold">${stats[i].lunch}</div></div>
+                        <div><div class="text-[10px] text-gray-400">晚</div><div class="text-sm font-bold">${stats[i].dinner}</div></div>
+                    </div>
+                </div>
+            `).join('');
+
+            const detailEl = document.getElementById('admin-details');
+            const detailsHtml = nextWeekDates.map((date, i) => {
+                const total = stats[i].breakfast + stats[i].lunch + stats[i].dinner;
+                if (total === 0) return '';
+                return `
+                    <div class="border-l-4 border-blue-500 pl-4 py-2 bg-blue-50/30 rounded-r-lg">
+                        <div class="flex items-baseline space-x-2">
+                            <h5 class="font-bold text-gray-800">${date.dayName}</h5>
+                            <span class="text-xs text-gray-400">${date.formatted}</span>
+                        </div>
+                        <p class="text-xs mt-2"><span class="font-bold text-orange-600">早餐 (${stats[i].breakfast}人):</span> ${stats[i].details.breakfast.join(', ') || '无'}</p>
+                        <p class="text-xs mt-1"><span class="font-bold text-green-600">中餐 (${stats[i].lunch}人):</span> ${stats[i].details.lunch.join(', ') || '无'}</p>
+                        <p class="text-xs mt-1"><span class="font-bold text-purple-600">晚餐 (${stats[i].dinner}人):</span> ${stats[i].details.dinner.join(', ') || '无'}</p>
+                    </div>
+                `;
+            }).join('');
+            detailEl.innerHTML = detailsHtml || '<p class="text-gray-400 text-center py-8">暂无订餐数据</p>';
+        }
+
+        document.getElementById('view-user').onclick = () => {
+            document.getElementById('user-view').classList.remove('hidden');
+            document.getElementById('admin-view').classList.add('hidden');
+            document.getElementById('view-user').className = "px-4 py-2 rounded-lg bg-blue-600 text-white font-medium";
+            document.getElementById('view-admin').className = "px-4 py-2 rounded-lg bg-gray-200 text-gray-700 font-medium";
+        };
+
+        document.getElementById('view-admin').onclick = () => {
+            document.getElementById('user-view').classList.add('hidden');
+            document.getElementById('admin-view').classList.remove('hidden');
+            document.getElementById('view-admin').className = "px-4 py-2 rounded-lg bg-blue-600 text-white font-medium";
+            document.getElementById('view-user').className = "px-4 py-2 rounded-lg bg-gray-200 text-gray-700 font-medium";
+        };
+
+        initUI();
+        initAuth();
+    </script>
+</body>
+</html>
