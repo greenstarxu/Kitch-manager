@@ -47,7 +47,7 @@
                     <label class="text-blue-800 font-medium whitespace-nowrap">中餐地址:</label>
                     <select id="lunch-location" class="w-full border border-blue-200 rounded-lg p-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm">
                         <option value="工厂">工厂</option>
-                        <option value="办公室">办公室</option>
+                        <option value="办公室" selected>办公室</option>
                     </select>
                 </div>
                 <!-- 晚餐地址 -->
@@ -113,6 +113,7 @@
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // 获取全局配置
         const firebaseConfig = JSON.parse(__firebase_config);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'canteen-demo';
 
@@ -120,76 +121,96 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        let user = null;
+        let currentUser = null;
         let allOrders = [];
         const daysOfWeek = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
         const mealTypes = ['breakfast', 'lunch', 'dinner'];
         let nextWeekDates = [];
 
+        /**
+         * 计算下周日期逻辑优化
+         */
         function calculateNextWeekDates() {
             const now = new Date();
-            const monday = new Date(now);
-            const daysToMonday = (1 + 7 - now.getDay()) % 7 || 7; 
-            monday.setDate(now.getDate() + daysToMonday);
+            const baseDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const currentDay = baseDate.getDay();
+            const daysToMonday = currentDay === 0 ? 1 : (8 - currentDay);
+            
+            const monday = new Date(baseDate);
+            monday.setDate(baseDate.getDate() + daysToMonday);
             
             const dates = [];
             for (let i = 0; i < 7; i++) {
-                const date = new Date(monday);
-                date.setDate(monday.getDate() + i);
+                const targetDate = new Date(monday);
+                targetDate.setDate(monday.getDate() + i);
+                
                 dates.push({
-                    formatted: `${date.getMonth() + 1}/${date.getDate()}`,
-                    full: date.toLocaleDateString(),
+                    formatted: `${targetDate.getMonth() + 1}/${targetDate.getDate()}`,
+                    full: `${targetDate.getFullYear()}-${targetDate.getMonth() + 1}-${targetDate.getDate()}`,
                     dayName: daysOfWeek[i]
                 });
             }
             return dates;
         }
 
+        /**
+         * 初始化界面
+         */
         function initUI() {
-            nextWeekDates = calculateNextWeekDates();
-            const tableBody = document.getElementById('order-table-body');
-            tableBody.innerHTML = '';
-            
-            nextWeekDates.forEach((dateInfo, index) => {
-                const isSunday = (index === 6); // 周日
-                const row = document.createElement('tr');
-                row.className = "border-t border-gray-100 hover:bg-gray-50 transition-colors";
+            try {
+                nextWeekDates = calculateNextWeekDates();
+                const tableBody = document.getElementById('order-table-body');
+                const weekRangeDisplay = document.getElementById('week-range');
                 
-                let mealCells = mealTypes.map(meal => {
-                    // 判断周日中晚餐不开放
-                    const isRestricted = isSunday && (meal === 'lunch' || meal === 'dinner');
-                    const disabledAttr = isRestricted ? 'disabled' : '';
-                    const labelText = isRestricted ? '不开放' : '需要';
-                    
-                    return `
-                        <td class="p-4 text-center">
-                            <input type="checkbox" id="check-${index}-${meal}" 
-                                class="hidden meal-checkbox" 
-                                data-day="${index}" 
-                                data-meal="${meal}" 
-                                ${disabledAttr}>
-                            <label for="check-${index}-${meal}" 
-                                class="inline-block px-4 py-1 border border-gray-200 rounded-full cursor-pointer hover:border-blue-400 transition-colors">
-                                ${labelText}
-                            </label>
-                        </td>
-                    `;
-                }).join('');
+                if (!tableBody || !weekRangeDisplay) return;
 
-                row.innerHTML = `
-                    <td class="p-4">
-                        <div class="text-sm text-gray-400 font-medium">${dateInfo.formatted}</div>
-                        <div class="font-bold text-gray-700">${dateInfo.dayName}</div>
-                    </td>
-                    ${mealCells}
-                `;
-                tableBody.appendChild(row);
-            });
-            document.getElementById('week-range').innerText = `下周周期: ${nextWeekDates[0].full} 至 ${nextWeekDates[6].full}`;
+                tableBody.innerHTML = '';
+                
+                nextWeekDates.forEach((dateInfo, index) => {
+                    const isSunday = (index === 6); 
+                    const row = document.createElement('tr');
+                    row.className = "border-t border-gray-100 hover:bg-gray-50 transition-colors";
+                    
+                    let mealCells = mealTypes.map(meal => {
+                        const isRestricted = isSunday && (meal === 'lunch' || meal === 'dinner');
+                        const disabledAttr = isRestricted ? 'disabled' : '';
+                        const labelText = isRestricted ? '不开放' : '需要';
+                        
+                        return `
+                            <td class="p-4 text-center">
+                                <input type="checkbox" id="check-${index}-${meal}" 
+                                    class="hidden meal-checkbox" 
+                                    data-day="${index}" 
+                                    data-meal="${meal}" 
+                                    ${disabledAttr}>
+                                <label for="check-${index}-${meal}" 
+                                    class="inline-block px-4 py-1 border border-gray-200 rounded-full cursor-pointer hover:border-blue-400 transition-colors">
+                                    ${labelText}
+                                </label>
+                            </td>
+                        `;
+                    }).join('');
+
+                    row.innerHTML = `
+                        <td class="p-4">
+                            <div class="text-sm text-gray-400 font-medium">${dateInfo.formatted}</div>
+                            <div class="font-bold text-gray-700">${dateInfo.dayName}</div>
+                        </td>
+                        ${mealCells}
+                    `;
+                    tableBody.appendChild(row);
+                });
+
+                weekRangeDisplay.innerText = `下周周期: ${nextWeekDates[0].full} 至 ${nextWeekDates[6].full}`;
+            } catch (e) {
+                console.error("初始化UI失败:", e);
+                document.getElementById('week-range').innerText = "日期计算出错，请刷新重试";
+            }
         }
 
         function showToast(msg) {
             const toast = document.getElementById('toast');
+            if (!toast) return;
             toast.innerText = msg;
             toast.classList.remove('hidden');
             setTimeout(() => toast.classList.add('hidden'), 3000);
@@ -203,13 +224,13 @@
                     await signInAnonymously(auth);
                 }
             } catch (error) {
-                console.error("认证失败:", error);
+                console.error("Firebase 认证失败:", error);
             }
         };
 
         onAuthStateChanged(auth, (u) => {
-            user = u;
-            if (user) {
+            currentUser = u;
+            if (currentUser) {
                 loadOrders();
             }
         });
@@ -225,10 +246,12 @@
                 return;
             }
 
-            if (!user) return;
+            if (!currentUser) {
+                showToast("正在连接服务器，请稍候...");
+                return;
+            }
 
             const selections = [];
-            // 选中的且未被禁用的（确保逻辑一致性）
             document.querySelectorAll('.meal-checkbox:checked:not(:disabled)').forEach(cb => {
                 selections.push({
                     day: parseInt(cb.dataset.day),
@@ -242,29 +265,32 @@
             }
 
             try {
-                const orderDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', user.uid);
+                const orderDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', currentUser.uid);
                 await setDoc(orderDocRef, {
                     username: username,
                     lunchLocation: lunchLocation,
                     dinnerLocation: dinnerLocation,
-                    uid: user.uid,
+                    uid: currentUser.uid,
                     selections: selections,
                     updatedAt: new Date().toISOString()
                 });
                 showToast("提交成功！");
             } catch (err) {
+                console.error("保存失败:", err);
                 showToast("提交出错，请稍后重试");
             }
         };
 
         function loadOrders() {
-            if (!user) return;
+            if (!currentUser) return;
             const ordersCol = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
             onSnapshot(ordersCol, (snapshot) => {
                 allOrders = [];
                 snapshot.forEach(doc => allOrders.push(doc.data()));
                 renderStats();
-            }, (error) => console.error(error));
+            }, (error) => {
+                console.error("监听数据失败:", error);
+            });
         }
 
         function renderStats() {
@@ -290,39 +316,44 @@
             });
 
             const summaryEl = document.getElementById('stats-summary');
-            summaryEl.innerHTML = nextWeekDates.map((date, i) => `
-                <div class="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
-                    <div class="flex justify-between items-start mb-1">
-                        <h4 class="font-bold text-blue-600 text-sm">${date.dayName}</h4>
-                        <span class="text-[10px] text-gray-300 font-mono">${date.formatted}</span>
+            if (summaryEl) {
+                summaryEl.innerHTML = nextWeekDates.map((date, i) => `
+                    <div class="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                        <div class="flex justify-between items-start mb-1">
+                            <h4 class="font-bold text-blue-600 text-sm">${date.dayName}</h4>
+                            <span class="text-[10px] text-gray-300 font-mono">${date.formatted}</span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-1 text-center border-t pt-1">
+                            <div><div class="text-[10px] text-gray-400">早</div><div class="text-sm font-bold">${stats[i].breakfast}</div></div>
+                            <div><div class="text-[10px] text-gray-400">中</div><div class="text-sm font-bold">${stats[i].lunch}</div></div>
+                            <div><div class="text-[10px] text-gray-400">晚</div><div class="text-sm font-bold">${stats[i].dinner}</div></div>
+                        </div>
                     </div>
-                    <div class="grid grid-cols-3 gap-1 text-center border-t pt-1">
-                        <div><div class="text-[10px] text-gray-400">早</div><div class="text-sm font-bold">${stats[i].breakfast}</div></div>
-                        <div><div class="text-[10px] text-gray-400">中</div><div class="text-sm font-bold">${stats[i].lunch}</div></div>
-                        <div><div class="text-[10px] text-gray-400">晚</div><div class="text-sm font-bold">${stats[i].dinner}</div></div>
-                    </div>
-                </div>
-            `).join('');
+                `).join('');
+            }
 
             const detailEl = document.getElementById('admin-details');
-            const detailsHtml = nextWeekDates.map((date, i) => {
-                const total = stats[i].breakfast + stats[i].lunch + stats[i].dinner;
-                if (total === 0) return '';
-                return `
-                    <div class="border-l-4 border-blue-500 pl-4 py-2 bg-blue-50/30 rounded-r-lg">
-                        <div class="flex items-baseline space-x-2">
-                            <h5 class="font-bold text-gray-800">${date.dayName}</h5>
-                            <span class="text-xs text-gray-400">${date.formatted}</span>
+            if (detailEl) {
+                const detailsHtml = nextWeekDates.map((date, i) => {
+                    const total = stats[i].breakfast + stats[i].lunch + stats[i].dinner;
+                    if (total === 0) return '';
+                    return `
+                        <div class="border-l-4 border-blue-500 pl-4 py-2 bg-blue-50/30 rounded-r-lg">
+                            <div class="flex items-baseline space-x-2">
+                                <h5 class="font-bold text-gray-800">${date.dayName}</h5>
+                                <span class="text-xs text-gray-400">${date.formatted}</span>
+                            </div>
+                            <p class="text-xs mt-2"><span class="font-bold text-orange-600">早餐 (${stats[i].breakfast}人):</span> ${stats[i].details.breakfast.join(', ') || '无'}</p>
+                            <p class="text-xs mt-1"><span class="font-bold text-green-600">中餐 (${stats[i].lunch}人):</span> ${stats[i].details.lunch.join(', ') || '无'}</p>
+                            <p class="text-xs mt-1"><span class="font-bold text-purple-600">晚餐 (${stats[i].dinner}人):</span> ${stats[i].details.dinner.join(', ') || '无'}</p>
                         </div>
-                        <p class="text-xs mt-2"><span class="font-bold text-orange-600">早餐 (${stats[i].breakfast}人):</span> ${stats[i].details.breakfast.join(', ') || '无'}</p>
-                        <p class="text-xs mt-1"><span class="font-bold text-green-600">中餐 (${stats[i].lunch}人):</span> ${stats[i].details.lunch.join(', ') || '无'}</p>
-                        <p class="text-xs mt-1"><span class="font-bold text-purple-600">晚餐 (${stats[i].dinner}人):</span> ${stats[i].details.dinner.join(', ') || '无'}</p>
-                    </div>
-                `;
-            }).join('');
-            detailEl.innerHTML = detailsHtml || '<p class="text-gray-400 text-center py-8">暂无订餐数据</p>';
+                    `;
+                }).join('');
+                detailEl.innerHTML = detailsHtml || '<p class="text-gray-400 text-center py-8">暂无订餐数据</p>';
+            }
         }
 
+        // 视图切换
         document.getElementById('view-user').onclick = () => {
             document.getElementById('user-view').classList.remove('hidden');
             document.getElementById('admin-view').classList.add('hidden');
@@ -337,8 +368,15 @@
             document.getElementById('view-user').className = "px-4 py-2 rounded-lg bg-gray-200 text-gray-700 font-medium";
         };
 
-        initUI();
-        initAuth();
+        window.addEventListener('DOMContentLoaded', () => {
+            initUI();
+            initAuth();
+        });
+        
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            initUI();
+            initAuth();
+        }
     </script>
 </body>
 </html>
